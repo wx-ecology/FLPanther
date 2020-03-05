@@ -1,0 +1,145 @@
+---
+title: "Panther GLMM"
+author: "Wenjing Xu"
+date: "3/4/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lme4)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(arm)
+library(MCMCglmm)
+library(plotMCMC)
+library(reshape)
+
+data <- read.csv("All_Pts_FINAL.csv")
+veg.code <- read.csv("VegCombineCode.csv")
+# reshape data
+data <- data %>% dplyr::left_join(veg.code, by = "CLC_STATE")
+data <- data %>% filter (!is.na(Fire_Cat))
+
+```
+
+## Data exploration
+```{r data exploration}
+# Ave_Dry and Ave_Wet correlated, select wet.
+# Home range and DenID should only pick one.
+data <- data %>% dplyr::select(Used, CatID, DenID, Fire_Cat, Age, Ave_Wet, Prec_Tree, dist2build, Combined) %>% rename(Veg_Class = Combined)
+# specify factors
+data$CatID <- as.factor(data$CatID)
+data$DenID <- as.factor(data$DenID)
+data$Fire_Cat <- as.factor(data$Fire_Cat)
+data$Veg_Class <- as.factor(data$Veg_Class)
+
+data.1 <- data %>% filter (Used == "1") %>% group_by(Fire_Cat) %>% summarise(used.count = n())
+data.1
+```
+
+```{r colinearity}
+cor(data[,c(5:8)]) #does not seem to have strong linear relations
+ggpairs(data[, c("Age", "Ave_Wet", "Prec_Tree", "dist2build")])
+```
+
+This plot further confirmed that there are no obvious linear relations. Yet, it seems like all four of them have skewed distribution, so we use a square root scale.
+
+```{r categorical variables}
+ggplot(data, aes(x = Fire_Cat, y = CatID)) +
+  stat_sum(aes(size = ..n.., group = 1)) +
+  scale_size_area(max_size=10)
+```
+Lots of U.
+
+```{r}
+data.2 <- melt(data[, c("Used", "Age", "Ave_Wet", "Prec_Tree", "dist2build")], id.vars="Used")
+ggplot(data.2, aes(factor(Used), y = value, fill=factor(Used))) +
+    geom_boxplot() +
+    facet_wrap(~variable, scales="free_y")
+
+```
+Super clear that they pick high tree precentage area. slightly far away from building, almost no difference in age and ave wet. We will see in the real model. 
+
+
+```{r scaling}
+# scaling numeric variables by deviding two standard deviations for binary predictors
+# http://www.stat.columbia.edu/~gelman/research/published/standardizing7.pdf
+data.scaled <- data
+data.scaled[,5:8] <- sapply(data[,5:8], rescale, binary.inputs = "full")
+#data.scaled$Ave_Wet <- sqrt(data.scaled$Ave_Wet)
+#data.scaled$dist2build <- sqrt(data.scaled$dist2build)
+#data.scaled$Prec_Tree <- sqrt(data.scaled$Prec_Tree)  # issue: take sqrt creates lots of NA 
+ggpairs(data.scaled[, c("Age", "Ave_Wet", "Prec_Tree", "dist2build")])
+
+```
+The table shows we have a unbalanced dataset in terms of Fire_Cat. In principle, lme4 can deal with unbalanced data sets but the low number of data points in some cells of the design means that it is hard to estimate some of the effects. 
+
+## fitting and diagnostic glmer
+```{r fitting glmer}
+# Hypothesis 1
+
+m.1 <- glmer(Used ~ Fire_Cat + Prec_Tree + Veg_Class + Prec_Tree + Age + (1|CatID) , data = data.scaled, family = binomial, nAGQ = 10)
+print(summary(m.1), correlation = FALSE)
+
+## Mar 3 2020: keep going https://stats.idre.ucla.edu/r/dae/mixed-effects-logistic-regression/ 
+
+#m.2 <- glmer(Used ~ Fire_Cat + Prec_Tree + Veg_Class + (Age|CatID) , data = data.scaled, family = binomial)
+#m.3 <- glmer(Used ~ Fire_Cat + (1|CatID) , data = data.scaled, family = binomial)
+# quick look at the results
+#print(summary(m.2), correlation = FALSE)
+#print(summary(m.3), correlation = FALSE)
+
+p1 <- plot(m.1,id=0.05)
+plot(p1)
+```
+glmm has singularity issue. "One alternative (suggested by Robert LaBudde) for the small-numbers-of-levels scenario is to “fit the model with the random factor as a fixed effect, get the level coefficients in the sum to zero form, and then compute the standard deviation of the coefficients.” This is appropriate for users who are (a) primarily interested in measuring variation (i.e. the random effects are not just nuisance parameters, and the variability [rather than the estimated values for each level] is of scientific interest), (b) unable or unwilling to use other approaches (e.g. MCMC with half-Cauchy priors in WinBUGS), (c) unable or unwilling to collect more data. For the simplest case (balanced, orthogonal, nested designs with normal errors) these estimates of standard deviations should equal the classical method-of-moments estimates."
+
+
+```{r}
+
+```
+
+## MCMCglmm
+
+```{r MCMC}
+# try MCMCglmm 
+# https://github.com/tmalsburg/MCMCglmm-intro
+#most people encounter situations in which lme4 does not provide answers because the model-fitting process fails to converge. This is can be the case when the model is too complex to be supported by the available data. Bayesian implementations of mixed-effects models can help in some of these situations because mild priors on the random effects parameters can be used to constrain the search space. In non-technical terms, the Bayesian framework allows us to nudge the model fitting process in the right direction.
+# set prior
+set.seed(14)
+prior.m3 <- list(
+  R=list(V=1, n=1, fix=1),
+  G=list(G1=list(V        = diag(1),
+                 n        = 1,
+                 alpha.mu = rep(0, 1),
+                 alpha.V  = diag(1)*25^2),
+         G2=list(V        = diag(1),
+                 n        = 1,
+                 alpha.mu = rep(0, 1),
+                 alpha.V  = diag(1)*25^2)))
+
+m3 <- MCMCglmm(pronoun ~ (a + b + c)^3,
+                       ~ us(1 + (a + b + c)^3):subject +
+                         us(1 + (a + b    )^2):item,
+               data   = d,
+               family = "categorical",
+               prior  = prior.m3,
+               thin   = 1,
+               burnin = 3000,
+               nitt   = 4000)
+
+m.3 <- MCMCglmm(Used~Fire_Cat,
+                random=~CatID, 
+                data=data.scaled,
+                family="categorical",
+                prior  = prior.m3,
+                verbose=FALSE)
+
+
+print(summary(m.3))
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
