@@ -118,6 +118,7 @@ Super clear that they pick high tree precentage area. slightly far away from bui
 
 
 ## fitting and diagnostic clogit
+The model selection process can be described as evaluating candidate models (with Fire_cat always be one variable). We considered relevant interactions into the most parsimonious models to see if they would increase fit, but models with interactions always ranked poorer (higher AICc) than models excluding them. 
 ```{r fitting round 1}
 # full model
 m.0 <- clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data.L, method='efron')
@@ -154,6 +155,10 @@ m.102 <- clogit(Used ~ Fire_Cat + L.dist2build + strata(DenID), data = data.L, m
 AICc(m.100, m.101, m.102)
 ```
 Best model is m.100. 
+
+The selection coefficients estimated by the conditional logistic regression are the log odds ratio for a habitat type being chosen relative to a reference habitat type (beta = 0) (there is no intercept in clogit model). As such, selection for the reference habitat occurs when the other habitat types have beta < 0. 
+
+## model validation. 
 
 ```{r clogitL1 validation, include = false}
 m.100c <- clogitL1( y = data.L$Used, x = cbind(data.L$Fire_Cat, data.L$Prec_Tree, data.L$L.dist2build), strata = data.L$DenID)
