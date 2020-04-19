@@ -1,8 +1,10 @@
 ---
-title: "Panther GLMM"
+title: "Panther CLOGIT"
 author: "Wenjing Xu"
 date: "4/17/2020"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -19,6 +21,8 @@ library(reshape)
 library(aod)
 library(fastDummies)
 library(MuMIn)
+library(hab)
+library(cowplot)
 ```
 
 ## dataframe prep
@@ -86,7 +90,7 @@ ggpairs(data.L[, c( "Ave_Wet", "Prec_Tree", "L.dist2build")])
 
 This plot further confirmed that there are no obvious linear relations. 
 
-```{r categorical variables, include = false}
+```{r categorical variables, include = FALSE}
 #The table shows we have a unbalanced dataset in terms of Fire_Cat. In principle, lme4 can deal with unbalanced data sets but the low number of data points in some cells of the design means that it is hard to estimate some of the effects. 
 data.L %>% group_by(Fire_Cat) %>% summarise(used.count = n())
 par(mfrow = c(1, 2))
@@ -105,7 +109,7 @@ ggplot(data.2, aes(factor(Used), y = value, fill=factor(Used))) +
 ```
 Super clear that they pick high tree precentage area. slightly far away from building, almost no difference in age and ave wet. We expect precentage tree will play an important role.
 
-```{r scaling, include = false}
+```{r scaling, include = FALSE}
 # # scaling numeric variables by deviding two standard deviations for binary predictors
 # # http://www.stat.columbia.edu/~gelman/research/published/standardizing7.pdf
 # data.scaled <- data
@@ -117,7 +121,7 @@ Super clear that they pick high tree precentage area. slightly far away from bui
 ```
 
 
-## fitting and diagnostic clogit
+## fitting conditional logistic regression model and model selection
 The model selection process can be described as evaluating candidate models (with Fire_cat always be one variable). We considered relevant interactions into the most parsimonious models to see if they would increase fit, but models with interactions always ranked poorer (higher AICc) than models excluding them. 
 ```{r fitting round 1}
 # full model
@@ -152,75 +156,57 @@ Drop ave_wet.
 m.100 <- clogit(Used ~ Fire_Cat + Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
 m.101 <-  clogit(Used ~ Fire_Cat + Prec_Tree + strata(DenID), data = data.L, method='efron')
 m.102 <- clogit(Used ~ Fire_Cat + L.dist2build + strata(DenID), data = data.L, method='efron')
-AICc(m.100, m.101, m.102)
+
+# test nonlinear effect of road
+data.L2 <- data.L
+data.L2$L.dist2build2 <- data.L2$L.dist2build*data.L2$L.dist2build
+m.10001 <- clogit(Used ~ Fire_Cat + Prec_Tree + L.dist2build +  L.dist2build2 + strata(DenID), data = data.L2, method='efron')
+
+#test interaction terms 
+m.10002 <- clogit(Used ~ Fire_Cat + Fire_Cat:Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
+m.10003 <- clogit(Used ~ Prec_Tree + Fire_Cat:Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
+
+AICc(m.100, m.101, m.102, m.10001, m.10002, m.10003)
 ```
-Best model is m.100. 
-
-The selection coefficients estimated by the conditional logistic regression are the log odds ratio for a habitat type being chosen relative to a reference habitat type (beta = 0) (there is no intercept in clogit model). As such, selection for the reference habitat occurs when the other habitat types have beta < 0. 
-
-## model validation. 
-
-```{r clogitL1 validation, include = false}
-m.100c <- clogitL1( y = data.L$Used, x = cbind(data.L$Fire_Cat, data.L$Prec_Tree, data.L$L.dist2build), strata = data.L$DenID)
-plot(m.100c, logX = TRUE)
-clcvObj = cv.clogitL1(m.100c, 5)
-plot(clcvObj)
+Best model is m.100.
+```{r optimal model summary}
+summary(m.100)
 ```
 
+## model validation
+
+```{r hab package}
+#source code https://github.com/basille/hab/blob/master/R/kfold.r 
+# in the output, cor is Spearman rank correlations r_s
+k_fold <- kfold(m.100, k=5, nrepet = 5, jitter = FALSE, reproducible = TRUE, details = FALSE)
+rs.mean <- k_fold %>% dplyr::filter (type == "obs") %>% summarise(mean(cor))
+rs.p <- t.test(k_fold %>% dplyr::filter (type == "obs") %>% dplyr::select(cor))
+```
+
+Residual deviance : `r sum(residuals(m.100, type = "deviance")^2)` on `r 913-8` degree of freedom. Over dispersion is not a problem. 
+
+The 5-fold cross validation (sensu Boyce et al 2002) provided a mean Spearman's Rank corerltion of `r rs.mean`, P = `r rs.p$p.value`, < 0.01. The model is pretty good. 
 
 
-
-
-
+## result plots
 ```{r confidence interval} 
-# this confident interval is calculated based on maximum likihood
-# note that the numbers here are log-transformed
-co.table <- cbind(OR = coef(m.2), confint(m.2))
+co.table <- cbind(OR = coef(m.100), confint(m.100))
 co.df <- data.frame(variable = row.names(co.table), estimate = co.table[1:nrow(co.table), 1], LL = co.table[1:nrow(co.table), 2], UL =  co.table[1:nrow(co.table), 3])
 co.df$variable <- as.character(co.df$variable)
 
-ggplot(co.df, aes(y=estimate, x=variable, ymin=LL, ymax=UL)) + geom_pointrange() + coord_flip()
+ggplot(co.df, aes(y=estimate, x=variable, ymin=LL, ymax=UL)) + geom_pointrange() + coord_flip() + ylim(-2,2)
 ```
-For every unit increase in tree percent, the *log odds* of den presence increase for 1.22. For fire, change from category A to B, the *log odds* for den presence increase for 5.1
+
+The selection coefficients estimated by the conditional logistic regression are the log odds ratio for a habitat type being chosen relative to a reference habitat type (beta = 0) (there is no intercept in clogit model). As such, selection for the reference habitat occurs when the other habitat types have beta < 0. ABCD are relatively more selected than U. But only C is slightly significant, others CI overlap with 0. CI of prec_tree is high.  
 
 
-We can test for an overall effect of rank using the wald.test function of the aod library. The order in which the coefficients are given in the table of coefficients is the same as the order of the terms in the model. This is important because the wald.test function refers to the coefficients by their order in the model. We use the wald.test function.
-
-``` {r overall effect}
-wald.test(b = coef(m.2), Sigma = vcov(m.2), Terms = 1:5)
-```
-The chi-squared test statistic of 308.8, with 5 degrees of freedom is associated with a p-value of 0.00 indicating that the overall effect of rank is statistically significant.
-
-
-We can also test additional hypotheses about the differences in the coefficients for the different levels of rank. To contrast these two terms, we multiply one of them by 1, and the other by -1. The other terms in the model are not involved in the test, so they are multiplied by 0. The second line of code below uses L=l to tell R that we wish to base the test on the vector l (rather than using the Terms option as we did above).
-``` {r additional hypotheses}
-l <- cbind(1, -1, 0, 0, 0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0)
-wald.test(b = coef(m.2), Sigma = vcov(m.2), L = l)
-
-l <- cbind(0, 0, 0, 1, -1 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0,0 )
-wald.test(b = coef(m.2), Sigma = vcov(m.2), L = l)
-```
-It looks like only A is significantly different from other fire cat. 
-
-Now exponentiate the coefficients and interpret them as odds-ratios. 
-```{r}
-### odds ratios and 95% CI
-exp(cbind(OR = coef(m.2), confint(m.2)))
-```
-For every unit increase in tree percent, the odds of den presence increase for 6.756 (note that one unit is like from 0 precent to 100% tree. but in reality it is limited from 0 to 1). For fire, change from category A to B, the odds for den presence increase for 1.131. Or, when holding all other variables as fixed, Fire Cat B is 13% more likely to have dens then newly burned area. 
-
-
-
-Create a table to plot predict probabilities varying percent tree
 ``` {r predict - tree prec by fire cat}
-newdata <- with(data.scaled[4:9], data.frame(Fire_Cat = factor(rep(c("A", "B", "C", "D", "U"), each = 100)),
-                                                          Age = mean(data.scaled$Age),
-                                                          Ave_Wet = mean(data.scaled$Ave_Wet), 
-                                                          Prec_Tree = rep(seq(from = -1, to = 1, length.out = 100), 5), 
-                                                          dist2build = mean(data.scaled$dist2build),
-                                                          Veg_Class = "Other"))
+newdata <- data.frame(DenID = factor(data.L$DenID[6]), 
+                      Fire_Cat = factor(rep(c("A", "B", "C", "D", "U"), each = 100)),
+                      Prec_Tree = rep(seq(from = 0, to = 100, length.out = 100), 5),
+                      L.dist2build = mean(data.L$L.dist2build))
 
-newdata <- cbind(newdata, predict(m.2, newdata = newdata, type = "link", se = TRUE))
+newdata <- cbind(newdata, predict(m.100, newdata = newdata, type = "lp", se = TRUE))
 newdata <- within(newdata, {
   PredictedProb <- plogis(fit)
   LL <- plogis(fit - (1.96 * se.fit))
@@ -229,28 +215,23 @@ newdata <- within(newdata, {
 
 p.1 <- ggplot(newdata, aes(x = Prec_Tree, y = PredictedProb)) + geom_ribbon(aes(ymin = LL,
     ymax = UL, fill = Fire_Cat), alpha = 0.2) + geom_line(aes(colour = Fire_Cat),
-    size = 1)
-p.1
-```
+    size = 1)  + theme(legend.position = "none")
 
-``` {r fire cat}
-newdata2 <- with(data.scaled[4:9], data.frame(Fire_Cat = factor(rep(c("A", "B", "C", "D", "U"), each = 5)),
-                                                          Age = mean(data.scaled$Age),
-                                                          Ave_Wet = mean(data.scaled$Ave_Wet), 
-                                                          Prec_Tree = mean(data.scaled$Prec_Tree), 
-                                                          dist2build = mean(data.scaled$dist2build),
-                                                          Veg_Class = rep(c("Other", "Marsh-Shrub-Swamp", "Prairie-Grassland", "Upland Forest", "Wetland Forest"), 5)))
 
-newdata2 <- cbind(newdata2, predict(m.2, newdata = newdata2, type = "link", se = TRUE))
-newdata2 <- within(newdata2, {
+newdata <- data.frame(DenID = factor(data.L$DenID[8]), 
+                      Fire_Cat = factor(rep(c("A", "B", "C", "D", "U"), each = 100)),
+                      Prec_Tree = mean(data.L$Prec_Tree),
+                      L.dist2build = rep(seq(from = min(data.L$L.dist2build), to = max(data.L$L.dist2build), length.out = 100), 5))
+
+newdata <- cbind(newdata, predict(m.100, newdata = newdata, type = "lp", se = TRUE))
+newdata <- within(newdata, {
   PredictedProb <- plogis(fit)
   LL <- plogis(fit - (1.96 * se.fit))
   UL <- plogis(fit + (1.96 * se.fit))
 })
+p.2 <- ggplot(newdata, aes(x = (10^(L.dist2build)-1), y = PredictedProb)) + geom_ribbon(aes(ymin = LL,
+    ymax = UL, fill = Fire_Cat), alpha = 0.2) + geom_line(aes(colour = Fire_Cat),
+    size = 1)  + xlab("dist2build") + theme(legend.position = c(0.9, 0.2))
 
-p.2 <- ggplot(newdata2, aes(x = Fire_Cat, y = PredictedProb, colour = Veg_Class)) + 
-  geom_point() + 
-  geom_linerange(aes(ymin = LL, ymax = UL))
-p.2
+plot_grid(p.1, p.2)
 ```
-"Other" is significantly higher than other classes. Need to further tease apart different classes.
