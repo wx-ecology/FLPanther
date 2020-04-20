@@ -1,10 +1,10 @@
 ---
-title: "Panther CLOGIT 10pts"
+title: "Panther CLOGIT 50 pts"
 author: "Wenjing Xu"
 date: "4/17/2020"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -24,6 +24,7 @@ library(MuMIn)
 library(hab)
 library(cowplot)
 ```
+This round using 50 random points instead of 10. 
 
 ## dataframe prep
 ```{r data prep}
@@ -35,7 +36,8 @@ data <- data %>% dplyr::left_join(veg.code, by = "CLC_STATE")
 data.full <- data %>% filter (!is.na(Fire_Cat))
 # reduce to 10 random points for each den 
 set.seed(17)
-data.0 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(10)
+# decide random sample size (smaller than 100)
+data.0 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(50)
 data.1 <- data.full %>% filter( Used == 1 ) 
 data <- union (data.1, data.0) %>% arrange (DenID)
 
@@ -55,8 +57,6 @@ data$Fire_Cat <- factor(data$Fire_Cat, levels = c("U", "A", "B", "C", "D"))
 # investiage combined class
 #data %>% filter (Used == "1") %>% group_by(Combined) %>% summarise(used.count = n())
 ```
-
-
 
 
 ```{r reclass veg class}
@@ -141,22 +141,38 @@ m.3 <- clogit(Used ~ Fire_Cat + Veg_Class + Ave_Wet + L.dist2build + strata(DenI
 m.4 <- clogit(Used ~ Fire_Cat + Prec_Tree + Ave_Wet + L.dist2build + strata(DenID), data = data.L, method='efron')
 AICc(m.0, m.1,m.2,m.3,m.4)
 ```
-The term exp(coef) is giving the odds ratio for an increase of 1 unit in the independent variable. We drop vegclass here.
+The term exp(coef) is giving the odds ratio for an increase of 1 unit in the independent variable. m.1 is now the best model. We drop Ave.Wet here instead of vegclass.
 
 ```{r fitting round 2}
-m.10 <- clogit(Used ~ Fire_Cat + Prec_Tree + Ave_Wet + L.dist2build + strata(DenID), data = data.L, method='efron')
-m.11 <- clogit(Used ~ Fire_Cat + Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
-m.12 <- clogit(Used ~ Fire_Cat + Prec_Tree + Ave_Wet + strata(DenID), data = data.L, method='efron')
-m.13 <- clogit(Used ~ Fire_Cat  + Ave_Wet + L.dist2build + strata(DenID), data = data.L, method='efron')
+m.10 <- clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + L.dist2build + strata(DenID), data = data.L, method='efron')
+m.11 <- clogit(Used ~ Fire_Cat + Veg_Class + L.dist2build + strata(DenID), data = data.L, method='efron')
+m.12 <- clogit(Used ~ Fire_Cat + Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
+m.13 <- clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + strata(DenID), data = data.L, method='efron')
 AICc(m.10, m.11, m.12, m.13)
 ```
-Drop ave_wet.
+Drop Veg class (even tho only a little bit different in AIC, but more parsimonious. 
+```{r likelihood ratop test}
+library(lmtest)
+lrtest(m.10, m.12)
+```
+
+Likelihood ratio test results a p-value of 0.07 for m.10 and m.12. Prefer m.12.
 
 ```{r fitting round 3}
 m.100 <- clogit(Used ~ Fire_Cat + Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
-m.101 <-  clogit(Used ~ Fire_Cat + Prec_Tree + strata(DenID), data = data.L, method='efron')
-m.102 <- clogit(Used ~ Fire_Cat + L.dist2build + strata(DenID), data = data.L, method='efron')
+m.101 <-  clogit(Used ~ Fire_Cat + L.dist2build + strata(DenID), data = data.L, method='efron')
+m.102 <- clogit(Used ~ Fire_Cat + Prec_Tree + strata(DenID), data = data.L, method='efron')
+m.103 <- clogit(Used ~ Prec_Tree + strata(DenID), data = data.L, method='efron')
+AICc(m.100, m.101, m.102)
+```
+Best model is m.100, and likeliihood ratio test proves it. 
+```{r} 
+lrtest(m.100, m.102)
+```
 
+Test interactions and non-linear effect among the remaining variables (only ecologically plausible ones are considered). 
+
+```{r non-linear effect?}
 # test nonlinear effect of road
 data.L2 <- data.L
 data.L2$L.dist2build2 <- data.L2$L.dist2build*data.L2$L.dist2build
@@ -166,9 +182,11 @@ m.10001 <- clogit(Used ~ Fire_Cat + Prec_Tree + L.dist2build +  L.dist2build2 + 
 m.10002 <- clogit(Used ~ Fire_Cat + Fire_Cat:Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
 m.10003 <- clogit(Used ~ Prec_Tree + Fire_Cat:Prec_Tree + L.dist2build + strata(DenID), data = data.L, method='efron')
 
-AICc(m.100, m.101, m.102, m.10001, m.10002, m.10003)
+AICc(m.100, m.10001, m.10002, m.10003)
 ```
-Best model is m.100.
+m.100 is the best.
+
+
 ```{r optimal model summary}
 summary(m.100)
 ```
@@ -199,6 +217,7 @@ ggplot(co.df, aes(y=estimate, x=variable, ymin=LL, ymax=UL)) + geom_pointrange()
 
 The selection coefficients estimated by the conditional logistic regression are the log odds ratio for a habitat type being chosen relative to a reference habitat type (beta = 0) (there is no intercept in clogit model). As such, selection for the reference habitat occurs when the other habitat types have beta < 0. ABCD are relatively more selected than U. But only C is slightly significant, others CI overlap with 0. CI of prec_tree is high.  
 
+Different from when random points is 10, this time it seems that fire cat C is preferred (and is significant). The results looks better with 50 random points (more fit our expectation).
 
 ``` {r predict - tree prec by fire cat}
 newdata <- data.frame(DenID = factor(data.L$DenID[6]), 

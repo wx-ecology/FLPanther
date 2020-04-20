@@ -1,4 +1,4 @@
-#Florida Panther Den Site Selection
+# Florida Panther Den Site Selection
 ## data prep
 RandomPts_FireCat: generate random points for each HR
 Combine Fire Env: combine Den - fire category from previous analysis with new env extractions
