@@ -203,7 +203,7 @@ rs.p <- t.test(k_fold %>% dplyr::filter (type == "obs") %>% dplyr::select(cor))
 
 Residual deviance : `r sum(residuals(m.100, type = "deviance")^2)` on `r 913-8` degree of freedom. Over dispersion is not a problem. 
 
-The 5-fold cross validation (sensu Boyce et al 2002) provided a mean Spearman's Rank corerltion of `r rs.mean`, P = `r rs.p$p.value`, < 0.01. The model is pretty good. 
+The 5-fold cross validation (sensu Boyce et al 2002) provided a mean Spearman's Rank corerltion of `r rs.mean`, P = `r rs.p$p.value`, < 0.01. 
 
 
 ## result plots
