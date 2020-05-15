@@ -36,6 +36,7 @@ data$Fire_Cat <- factor(data$Fire_Cat, levels = c("U", "A", "B", "C", "D"))
 # also deleted age because does not really show importance but interfere with the modeling process from previous runs
 data <- data %>% dplyr::select(Used, DenID, Fire_Cat, Ave_Wet, Prec_Tree, dist2build, Combined) %>% dplyr::rename(Veg_Class = Combined)
 data$Veg_Class <- factor(data$Veg_Class, levels = c("Upland Forest", "Other", "Marsh-Shrub-Swamp", "Prairie-Grassland", "Wetland Forest"))
+data$Veg_Class <- relevel(data$Veg_Class, ref = 5)
 #data$Prec_Tree <- data$Prec_Tree/100 
 
 # reduce to 10 random points for each den 
@@ -59,8 +60,10 @@ data$L.dist2build <- log10(data$dist2build+1) #since some of the dist is 0
 ```{r fitting round 1}
 # STEP 1: full model
 cand.models.1 <- list()
-cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Prec_Tree + Prec_Tree + Fire_Cat + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
-cand.models.1[[2]] <- clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Prec_Tree + Prec_Tree:Veg_Class + Prec_Tree + Fire_Cat + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+cand.models.1[[2]] <- clogit(Used ~ Fire_Cat:Prec_Tree + Prec_Tree + Fire_Cat + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+cand.models.1[[3]] <- clogit(Used ~  Prec_Tree:Veg_Class + Prec_Tree + Fire_Cat + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+cand.models.1[[4]] <- clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
 Modnames <- paste("mod", 1:length(cand.models.1), sep = " ")
 aictab(cand.set = cand.models.1, modnames = Modnames, sort = TRUE)
 ## STEP 1 RESULT - KEEP mod 2 (no interaction term)
@@ -98,11 +101,42 @@ Modnames <- paste("mod", 1:length(cand.models.4), sep = " ")
 aictab(cand.set = cand.models.4, modnames = Modnames, sort = TRUE)
 ## mod 1 is better than any other 2. mod 1 is our final model.
 
+# whether it is better to keep fire 
+cand.models.5 <- list()
+cand.models.5[[1]] <-  cand.models.4[[1]]
+cand.models.5[[2]] <- update(cand.models.4[[1]],  . ~ . - Fire_Cat)
+Modnames <- paste("mod", 1:length(cand.models.5), sep = " ")
+aictab(cand.set = cand.models.5, modnames = Modnames, sort = TRUE)
+
 final.mod <- cand.models.4[[1]]
 summary(final.mod ) #include the exp(coef) table in the paper 
+
+final.mod <- clogit(Used ~ Fire_Cat + strata(DenID), data = data, method='efron')
+```
+## if use a completely different culture of model selection 
+Only test a list of candidate model. with number of variable controlled
+```{r fitting round 1}
+# clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+# 
+# data0 <- data
+# data <- data %>% filter ((DenID != "61") & (DenID != "94") & (DenID != "95A"))
+# data$Veg_Class <- droplevels(data$Veg_Class)
+
+cand.models.0 <- list()
+cand.models.0[[1]] <- clogit(Used ~ Fire_Cat:Prec_Tree + Prec_Tree + Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #forage impotant theory
+cand.models.0[[2]] <- clogit(Used ~ Fire_Cat:Veg_Class + Prec_Tree + Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #forage impotant theory
+cand.models.0[[3]] <- clogit(Used ~ Prec_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron') #forage impotant theory
+cand.models.0[[4]] <- clogit(Used ~ Prec_Tree + Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #
+cand.models.0[[5]] <- clogit(Used ~ Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #forage impotant theory
+cand.models.0[[6]] <- clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + L.dist2build + strata(DenID), data = data, method='efron') #hidden important theory
+cand.models.0[[7]] <- clogit(Used ~ Fire_Cat + Prec_Tree  + strata(DenID), data = data, method='efron') #hidden important theory
+cand.models.0[[8]] <- clogit(Used ~ Fire_Cat + strata(DenID), data = data, method='efron') #raw
+Modnames <- paste("mod", 1:length(cand.models.0), sep = " ")
+aictab(cand.set = cand.models.0, modnames = Modnames, sort = TRUE)
 ```
 
-# the regression coeffecients and hazard ratios (will not include as a graph in the paper)
+
+## the regression coeffecients and hazard ratios (will not include as a graph in the paper)
 ```{r confidence interval} 
 co.table <- cbind(OR = coef(final.mod), confint(final.mod))
 co.df <- data.frame(variable = row.names(co.table), estimate = co.table[1:nrow(co.table), 1], LL = co.table[1:nrow(co.table), 2], UL =  co.table[1:nrow(co.table), 3])
