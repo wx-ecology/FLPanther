@@ -1,0 +1,156 @@
+---
+title: "Panther_cLogit_FINAL"
+author: "Wenjing"
+date: "5/14/2020"
+output: html_document
+---
+
+This document is for the final analysis for the panther paper. The paper will be using 100 (97 random pts), and the result for 10 pts and 50 pts will be included in supplementary material. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(survival)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(MuMIn)
+library(AICcmodavg)
+library(cowplot)
+library(aod)
+```
+
+## dataframe prep
+```{r data prep}
+# reclassify vegetation class
+data <- read.csv("Final_Variable_all.csv")
+veg.code <- read.csv("VegCombineCode.csv")
+# reshape data
+data <- data %>% dplyr::left_join(veg.code, by = "CLC_STATE")
+# specify factors. Levels order will affect the baseline level in the modeling process
+data$DenID <- as.factor(data$DenID)
+data$Fire_Cat <- factor(data$Fire_Cat, levels = c("U", "A", "B", "C", "D"))
+# data %>% group_by(Combined) %>% summarise(used.count = n())
+# get rid of the factors that are ecologically unlikely to be meaningful
+# or that likely do not have much explanatory power (drop CatID because not enough replicates for each cat)
+# or are obviously correlated (e.g. ave_wet and ave_dry)
+# also deleted age because does not really show importance but interfere with the modeling process from previous runs
+data <- data %>% dplyr::select(Used, DenID, Fire_Cat, Ave_Wet, Prec_Tree, dist2build, Combined) %>% dplyr::rename(Veg_Class = Combined)
+data$Veg_Class <- factor(data$Veg_Class, levels = c("Upland Forest", "Other", "Marsh-Shrub-Swamp", "Prairie-Grassland", "Wetland Forest"))
+#data$Prec_Tree <- data$Prec_Tree/100 
+
+# reduce to 10 random points for each den 
+data.full <- data %>% filter (!is.na(Fire_Cat))
+set.seed(17)
+data.0 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(97)
+set.seed(17)
+data.50 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(50)
+set.seed(17)
+data.10 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(10)
+data.1 <- data.full %>% filter( Used == 1 ) 
+
+data <- union (data.1, data.0) %>% arrange (DenID)
+data.50 <- union (data.1, data.50) %>% arrange (DenID)
+data.10 <- union (data.1, data.10) %>% arrange (DenID)
+
+data$L.dist2build <- log10(data$dist2build+1) #since some of the dist is 0
+```
+
+## Fitting 
+```{r fitting round 1}
+# STEP 1: full model
+cand.models.1 <- list()
+cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Prec_Tree + Prec_Tree + Fire_Cat + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+cand.models.1[[2]] <- clogit(Used ~ Fire_Cat + Prec_Tree + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+Modnames <- paste("mod", 1:length(cand.models.1), sep = " ")
+aictab(cand.set = cand.models.1, modnames = Modnames, sort = TRUE)
+## STEP 1 RESULT - KEEP mod 2 (no interaction term)
+#summary(cand.models.1[[2]])
+
+# STEP 2: 
+cand.models.2 <- list()
+cand.models.2[[1]] <- cand.models.1[[2]]
+cand.models.2[[2]] <- update(cand.models.2[[1]],  . ~ . - Ave_Wet)
+cand.models.2[[3]] <- update(cand.models.2[[1]],  . ~ . - L.dist2build)
+cand.models.2[[4]] <- update(cand.models.2[[1]],  . ~ . - Prec_Tree)
+cand.models.2[[5]] <- update(cand.models.2[[1]],  . ~ . - Veg_Class)
+Modnames <- paste("mod", 1:length(cand.models.2), sep = " ")
+aictab(cand.set = cand.models.2, modnames = Modnames, sort = TRUE)
+## STEP 2 RESULT - KEEP mod 2 (no Ave_wet)
+
+# STEP 3: 
+cand.models.3 <- list()
+cand.models.3[[1]] <- cand.models.2[[2]]
+cand.models.3[[2]] <- update(cand.models.2[[2]],  . ~ . - L.dist2build)
+cand.models.3[[3]] <- update(cand.models.2[[2]],  . ~ . - Prec_Tree)
+cand.models.3[[4]] <- update(cand.models.2[[2]],  . ~ . - Veg_Class)
+Modnames <- paste("mod", 1:length(cand.models.3), sep = " ")
+aictab(cand.set = cand.models.3, modnames = Modnames, sort = TRUE)
+## mod 1 and mod 4 are very close to each other. Test likelihood ratio of the two nested model (Lewis et al 2010)
+lrtest(cand.models.3[[1]],cand.models.3[[4]])
+## the difference between mod 1 and mod 4 are not significant. aka the extra info added by having veg_class, which takes 4 degree of freedom, are not that signifant. choose mod 4 (leaving out veg_class)
+
+# STEP 4: 
+cand.models.4 <- list()
+cand.models.4[[1]] <- cand.models.3[[4]]
+cand.models.4[[2]] <- update(cand.models.3[[4]],  . ~ . - L.dist2build)
+cand.models.4[[3]] <- update(cand.models.3[[4]],  . ~ . - Prec_Tree)
+Modnames <- paste("mod", 1:length(cand.models.4), sep = " ")
+aictab(cand.set = cand.models.4, modnames = Modnames, sort = TRUE)
+## mod 1 is better than any other 2. mod 1 is our final model.
+
+final.mod <- cand.models.4[[1]]
+summary(final.mod ) #include the exp(coef) table in the paper 
+```
+
+# the regression coeffecients and hazard ratios (will not include as a graph in the paper)
+```{r confidence interval} 
+co.table <- cbind(OR = coef(final.mod), confint(final.mod))
+co.df <- data.frame(variable = row.names(co.table), estimate = co.table[1:nrow(co.table), 1], LL = co.table[1:nrow(co.table), 2], UL =  co.table[1:nrow(co.table), 3])
+co.df$variable <- as.character(co.df$variable)
+ggplot(co.df, aes(y=estimate, x=variable, ymin=LL, ymax=UL)) + geom_pointrange() + coord_flip()
+
+co.table <- cbind(OR = exp(coef(final.mod)), exp(confint(final.mod)))
+co.df <- data.frame(variable = row.names(co.table), estimate = co.table[1:nrow(co.table), 1], LL = co.table[1:nrow(co.table), 2], UL =  co.table[1:nrow(co.table), 3])
+co.df$variable <- as.character(co.df$variable)
+ggplot(co.df, aes(y=estimate, x=variable, ymin=LL, ymax=UL)) + geom_pointrange() + coord_flip() 
+```
+
+``` {r predict - tree prec by fire cat}
+newdata <- data.frame(DenID = factor(data$DenID[6]), 
+                      Fire_Cat = factor(rep(c("A", "B", "C", "D", "U"), each = 100)),
+                      Prec_Tree = rep(seq(from = 0, to = 100, length.out = 100), 5),
+                      L.dist2build = mean(data$L.dist2build))
+
+newdata <- cbind(newdata, predict(final.mod, newdata = newdata, type = "lp", se = TRUE))
+newdata <- within(newdata, {
+  PredictedProb <- plogis(fit)
+  LL <- plogis(fit - (1.96 * se.fit))
+  UL <- plogis(fit + (1.96 * se.fit))
+})
+
+p.1 <- ggplot(newdata, aes(x = Prec_Tree, y = PredictedProb)) + geom_ribbon(aes(ymin = LL,
+    ymax = UL, fill = Fire_Cat), alpha = 0.2) + geom_line(aes(colour = Fire_Cat),
+    size = 1)  + theme(legend.position = "none")
+
+
+newdata <- data.frame(DenID = factor(data.L$DenID[8]), 
+                      Fire_Cat = factor(rep(c("A", "B", "C", "D", "U"), each = 100)),
+                      Prec_Tree = mean(data.L$Prec_Tree),
+                      L.dist2build = rep(seq(from = min(data.L$L.dist2build), to = max(data.L$L.dist2build), length.out = 100), 5))
+
+newdata <- cbind(newdata, predict(final.mod, newdata = newdata, type = "lp", se = TRUE))
+newdata <- within(newdata, {
+  PredictedProb <- plogis(fit)
+  LL <- plogis(fit - (1.96 * se.fit))
+  UL <- plogis(fit + (1.96 * se.fit))
+})
+p.2 <- ggplot(newdata, aes(x = (10^(L.dist2build)-1), y = PredictedProb)) + geom_ribbon(aes(ymin = LL,
+    ymax = UL, fill = Fire_Cat), alpha = 0.2) + geom_line(aes(colour = Fire_Cat),
+    size = 1)  + xlab("dist2build") + theme(legend.position = c(0.9, 0.2))
+
+ggplot(newdata, aes(x = (10^(L.dist2build)-1)/1000, y = PredictedProb)) + geom_ribbon(aes(ymin = LL,
+    ymax = UL, fill = Fire_Cat), alpha = 0.2) + geom_line(aes(colour = Fire_Cat),
+    size = 1)  + xlab("dist2build") + theme(legend.position = c(0.9, 0.2)) 
+
+plot_grid(p.1, p.2)
+```
