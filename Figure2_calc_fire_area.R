@@ -69,8 +69,19 @@ library(cleangeo)
 # 
 # write.csv(areadf, "C:/Users/wenjing.xu/Google Drive/RESEARCH/Panther/Panther-Revive-2019/fire_area_by_HR.csv")
 areadf <- read.csv("C:/Users/wenjing.xu/Google Drive/RESEARCH/Panther/Panther-Revive-2019/Analysis/FLPanther/fire_area_by_HR.csv")
+areadf.1 <- areadf %>% dplyr::select(-X, -area) %>% pivot_wider(names_from = fire_cat, values_from = area.km2)
+areadf.2 <- areadf.1 %>% mutate(total = A + B + C + D + U，
+                    percent.A = round(A/total*100, digits = 2),
+                    percent.B = round(B/total*100, digits = 2),
+                    percent.C = round(C/total*100, digits = 2),
+                    percent.D = round(D/total*100, digits = 2),
+                    percent.U = round(U/total*100, digits = 2)) 
+write.csv(areadf.2, "C:/Users/wenjing.xu/Google Drive/RESEARCH/Panther/Panther-Revive-2019/Analysis/FLPanther/SuppTable1.csv")
 
-ggplot(areadf, aes(x=fire_cat, y = area/1000000)) +
+areadf.3 <- areadf.2 %>% dplyr::select(-A, -B, -C, -D, -U, -total)
+names(areadf.3)[2:6] <- c("A", "B", "C", "D", "U")
+areadf.3 <- areadf.3 %>% pivot_longer(2:6)
+ggplot(areadf.3, aes(x=name, y = value)) +
   geom_boxplot() +
   theme_ipsum(
     base_size = 12,
