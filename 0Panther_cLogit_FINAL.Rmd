@@ -1,7 +1,7 @@
 ---
 title: "Panther_cLogit_FINAL"
 author: "Wenjing"
-date: "5/14/2020"
+date: "11/02/2021"
 output: html_document
 ---
 
@@ -27,44 +27,34 @@ library(hrbrthemes)
 ## dataframe prep
 ```{r data prep}
 # reclassify vegetation class
-data <- read.csv("Final_Variable_all.csv")
+data <- read.csv("./JWM_resubmission/Final_Variable_All_New.csv")
 veg.code <- read.csv("VegCombineCode.csv")
 # reshape data
-data <- data %>% dplyr::left_join(veg.code, by = "CLC_STATE")
-# specify factors. Levels order will affect the baseline level in the modeling process
-data$DenID <- as.factor(data$DenID)
-data$Fire_Cat <- factor(data$Fire_Cat, levels = c("U", "A", "B", "C", "D"))
-# data %>% group_by(Combined) %>% summarise(used.count = n())
-# get rid of the factors that are ecologically unlikely to be meaningful
-# or that likely do not have much explanatory power (drop CatID because not enough replicates for each cat)
-# or are obviously correlated (e.g. ave_wet and ave_dry)
-# also deleted age because does not really show importance but interfere with the modeling process from previous runs
-data <- data %>% dplyr::select(Used, DenID, Fire_Cat, Ave_Wet, Perc_Tree, Combined) %>% dplyr::rename(Veg_Class = Combined)
+data <- data  %>% dplyr::left_join(veg.code, by = "CLC_STATE") %>%
+  # specify factors. Levels order will affect the baseline level in the modeling process
+  mutate(Den_ID = as.factor(Den_ID),
+         Fire_Cat = factor(data$Fire_Cat, levels = c("U", "A", "B", "C", "D")))
+
+data <- data %>% dplyr::select(Used, Den_ID, Fire_Cat, Ave_Wet, Perc_Tree, Combined) %>% dplyr::rename(Veg_Class = Combined)
 data$Veg_Class <- factor(data$Veg_Class, levels = c("Upland Forest", "Other", "Marsh-Shrub-Swamp", "Prairie-Grassland", "Wetland Forest"))
 data$Veg_Class <- relevel(data$Veg_Class, ref = 5)
-#data$Perc_Tree <- data$Perc_Tree/100 
 
-data.full <- data %>% filter (!is.na(Fire_Cat))
-set.seed(17)
-data.0 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(97)
-data.1 <- data.full %>% filter( Used == 1 ) 
-
-data.all <- dplyr::union(data.1, data.0)
-data <- data.all %>% dplyr::arrange (DenID)
+data <- data %>% dplyr::arrange (Den_ID) %>%
+  mutate(Ave_Wet_scale = scale(Ave_Wet),
+         Perc_Tree_scale = scale(Perc_Tree))
 ```
 
 ## Fitting 
 ```{r fitting round 1}
 # STEP 1: full model
 cand.models.1 <- list()
-cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron')
-cand.models.1[[2]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet  + strata(DenID), data = data, method='efron')
-cand.models.1[[3]] <- clogit(Used ~  Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron')
-cand.models.1[[4]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet  + strata(DenID), data = data, method='efron')
+cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(Den_ID), data = data, method='efron')
+cand.models.1[[2]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet  + strata(Den_ID), data = data, method='efron')
+cand.models.1[[3]] <- clogit(Used ~  Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(Den_ID), data = data, method='efron')
+cand.models.1[[4]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet  + strata(Den_ID), data = data, method='efron')
 Modnames <- paste("mod", 1:length(cand.models.1), sep = " ")
 aictab(cand.set = cand.models.1, modnames = Modnames, sort = TRUE)
 ## STEP 1 RESULT - KEEP mod 4 (no interaction term)
-#summary(cand.models.1[[2]])
 
 # STEP 2: 
 cand.models.2 <- list()
@@ -74,18 +64,20 @@ cand.models.2[[3]] <- update(cand.models.1[[4]],  . ~ . - Perc_Tree)
 cand.models.2[[4]] <- update(cand.models.1[[4]],  . ~ . - Veg_Class)
 Modnames <- paste("mod", 1:length(cand.models.2), sep = " ")
 aictab(cand.set = cand.models.2, modnames = Modnames, sort = TRUE)
-## STEP 2 RESULT - KEEP mod 2 (no Ave_wet)
+## STEP 2 RESULT - KEEP mod 4 (no Veg_Class)
+lrtest(cand.models.2[[4]], cand.models.2[[2]])
+## mod 1 and mod 4 are very close to each other. Test likelihood ratio of the two nested model (Lewis et al 2010)
+## "it is actually possible to use the LRT for comparing both nested and non-nested models."
+## the difference between mod 1 and mod 4 are not significant. aka the extra info added by having veg_class, which takes 4 degree of freedom, are not that signifant. choose mod 4 (leaving out veg_class)
 
 # STEP 3: 
 cand.models.3 <- list()
-cand.models.3[[1]] <- cand.models.2[[2]]
-cand.models.3[[2]] <- update(cand.models.2[[2]],  . ~ . - Perc_Tree)
-cand.models.3[[3]] <- update(cand.models.2[[2]],  . ~ . - Veg_Class)
+cand.models.3[[1]] <- cand.models.2[[4]]
+cand.models.3[[2]] <- update(cand.models.2[[4]],  . ~ . - Perc_Tree)
+cand.models.3[[3]] <- update(cand.models.2[[4]],  . ~ . - Ave_Wet)
 Modnames <- paste("mod", 1:length(cand.models.3), sep = " ")
 aictab(cand.set = cand.models.3, modnames = Modnames, sort = TRUE)
-## mod 1 and mod 4 are very close to each other. Test likelihood ratio of the two nested model (Lewis et al 2010)
-lrtest(cand.models.3[[1]],cand.models.3[[3]])
-## the difference between mod 1 and mod 4 are not significant. aka the extra info added by having veg_class, which takes 4 degree of freedom, are not that signifant. choose mod 4 (leaving out veg_class)
+# pick mod 3
 
 # STEP 4: 
 cand.models.4 <- list()
@@ -95,19 +87,13 @@ Modnames <- paste("mod", 1:length(cand.models.4), sep = " ")
 aictab(cand.set = cand.models.4, modnames = Modnames, sort = TRUE)
 ## mod 1 is better than any other 2. mod 1 is our final model.
 
-# whether it is better to keep fire 
-cand.models.5 <- list()
-cand.models.5[[1]] <-  cand.models.4[[1]]
-cand.models.5[[2]] <- update(cand.models.4[[1]],  . ~ . - Fire_Cat)
-Modnames <- paste("mod", 1:length(cand.models.5), sep = " ")
-aictab(cand.set = cand.models.5, modnames = Modnames, sort = TRUE)
-lrtest(cand.models.5[[1]],cand.models.5[[2]])
-
-# list1 <- list()
-# list1[[1]] <- cand.models.4[[1]]
-# list1[[2]] <- clogit(Used ~ Perc_Tree + L.dist2build + strata(DenID), data = data, method='efron')
-# Modnames <- paste("mod", 1:length(list1), sep = " ")
-# aictab(cand.set = list1, modnames = Modnames, sort = TRUE)
+# # whether it is better to keep fire 
+# cand.models.5 <- list()
+# cand.models.5[[1]] <-  cand.models.4[[1]]
+# cand.models.5[[2]] <- update(cand.models.4[[1]],  . ~ . - Fire_Cat)
+# Modnames <- paste("mod", 1:length(cand.models.5), sep = " ")
+# aictab(cand.set = cand.models.5, modnames = Modnames, sort = TRUE)
+# lrtest(cand.models.5[[1]],cand.models.5[[2]])
 
 final.mod <- cand.models.4[[1]]
 summary(final.mod ) #include the exp(coef) table in the paper 
@@ -116,20 +102,20 @@ summary(final.mod ) #include the exp(coef) table in the paper
 ## if use a completely different culture of model selection 
 Only test a list of candidate model. with number of variable controlled
 ```{r fitting round 1， echo = FALSE, eval = FALSE}
-# clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet + L.dist2build + strata(DenID), data = data, method='efron')
+# clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet + L.dist2build + strata(Den_ID), data = data, method='efron')
 # 
 # data0 <- data
-# data <- data %>% filter ((DenID != "61") & (DenID != "94") & (DenID != "95A"))
+# data <- data %>% filter ((Den_ID != "61") & (Den_ID != "94") & (Den_ID != "95A"))
 # data$Veg_Class <- droplevels(data$Veg_Class)
 cand.models.0 <- list()
-cand.models.0[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #forage impotant theory
-cand.models.0[[2]] <- clogit(Used ~ Fire_Cat:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #forage impotant theory
-cand.models.0[[3]] <- clogit(Used ~ Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron') #forage impotant theory
-cand.models.0[[4]] <- clogit(Used ~ Perc_Tree + Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #
-cand.models.0[[5]] <- clogit(Used ~ Fire_Cat + Veg_Class + strata(DenID), data = data, method='efron') #forage impotant theory
-cand.models.0[[6]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class  + strata(DenID), data = data, method='efron') #hidden important theory
-cand.models.0[[7]] <- clogit(Used ~ Fire_Cat + Perc_Tree  + strata(DenID), data = data, method='efron') #hidden important theory
-cand.models.0[[8]] <- clogit(Used ~ Fire_Cat + strata(DenID), data = data, method='efron') #raw
+cand.models.0[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + strata(Den_ID), data = data, method='efron') #forage impotant theory
+cand.models.0[[2]] <- clogit(Used ~ Fire_Cat:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + strata(Den_ID), data = data, method='efron') #forage impotant theory
+cand.models.0[[3]] <- clogit(Used ~ Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(Den_ID), data = data, method='efron') #forage impotant theory
+cand.models.0[[4]] <- clogit(Used ~ Perc_Tree + Fire_Cat + Veg_Class + strata(Den_ID), data = data, method='efron') #
+cand.models.0[[5]] <- clogit(Used ~ Fire_Cat + Veg_Class + strata(Den_ID), data = data, method='efron') #forage impotant theory
+cand.models.0[[6]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class  + strata(Den_ID), data = data, method='efron') #hidden important theory
+cand.models.0[[7]] <- clogit(Used ~ Fire_Cat + Perc_Tree  + strata(Den_ID), data = data, method='efron') #hidden important theory
+cand.models.0[[8]] <- clogit(Used ~ Fire_Cat + strata(Den_ID), data = data, method='efron') #raw
 Modnames <- paste("mod", 1:length(cand.models.0), sep = " ")
 aictab(cand.set = cand.models.0, modnames = Modnames, sort = TRUE)
 ```
@@ -150,7 +136,7 @@ ggplot(co.df, aes(y=estimate, x=variable, ymin=LL, ymax=UL)) + geom_pointrange()
 
 
 ```{r response curve figure}
-newdata <- data.frame(DenID = factor(data$DenID[6]), 
+newdata <- data.frame(Den_ID = factor(data$Den_ID[6]), 
                       Fire_Cat = factor(rep(c("A", "B", "C", "D", "U"), each = 100)),
                       Perc_Tree = rep(seq(from = 0, to = 100, length.out = 100), 5))
 
@@ -182,18 +168,21 @@ ggplot(newdata.2, aes(x = Perc_Tree, y = PredictedProb)) +
   theme(legend.text = element_text(size=12))
 ```
 
+
+
+
 ## 50 random pts
 ```{r}
 set.seed(17)
-data.50 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(50)
-data <- dplyr::union(data.1, data.50) %>% arrange(DenID)
+data.50 <- data %>% group_by (Den_ID) %>% filter( Used == 0 ) %>% sample_n(50)
+data <- dplyr::union(data.1, data.50) %>% arrange(Den_ID)
 
 # STEP 1: full model
 cand.models.1 <- list()
-cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron')
-cand.models.1[[2]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet  + strata(DenID), data = data, method='efron')
-cand.models.1[[3]] <- clogit(Used ~  Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron')
-cand.models.1[[4]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet  + strata(DenID), data = data, method='efron')
+cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(Den_ID), data = data, method='efron')
+cand.models.1[[2]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet  + strata(Den_ID), data = data, method='efron')
+cand.models.1[[3]] <- clogit(Used ~  Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(Den_ID), data = data, method='efron')
+cand.models.1[[4]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet  + strata(Den_ID), data = data, method='efron')
 Modnames <- paste("mod", 1:length(cand.models.1), sep = " ")
 aictab(cand.set = cand.models.1, modnames = Modnames, sort = TRUE)
 ## STEP 1 RESULT - KEEP mod 2 (no interaction term)
@@ -238,7 +227,7 @@ lrtest(cand.models.5[[1]],cand.models.5[[2]])
 
 # list1 <- list()
 # list1[[1]] <- cand.models.4[[1]]
-# list1[[2]] <- clogit(Used ~ Perc_Tree + L.dist2build + strata(DenID), data = data, method='efron')
+# list1[[2]] <- clogit(Used ~ Perc_Tree + L.dist2build + strata(Den_ID), data = data, method='efron')
 # Modnames <- paste("mod", 1:length(list1), sep = " ")
 # aictab(cand.set = list1, modnames = Modnames, sort = TRUE)
 
@@ -249,15 +238,15 @@ summary(final.mod ) #include the exp(coef) table in the paper
 ## 10 random pts
 ```{r}
 set.seed(17)
-data.10 <- data.full %>% group_by (DenID) %>% filter( Used == 0 ) %>% sample_n(10)
-data <- dplyr::union(data.1, data.10) %>% arrange(DenID)
+data.10 <- data.full %>% group_by (Den_ID) %>% filter( Used == 0 ) %>% sample_n(10)
+data <- dplyr::union(data.1, data.10) %>% arrange(Den_ID)
 
 # STEP 1: full model
 cand.models.1 <- list()
-cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron')
-cand.models.1[[2]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet  + strata(DenID), data = data, method='efron')
-cand.models.1[[3]] <- clogit(Used ~  Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(DenID), data = data, method='efron')
-cand.models.1[[4]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet  + strata(DenID), data = data, method='efron')
+cand.models.1[[1]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(Den_ID), data = data, method='efron')
+cand.models.1[[2]] <- clogit(Used ~ Fire_Cat:Perc_Tree + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet  + strata(Den_ID), data = data, method='efron')
+cand.models.1[[3]] <- clogit(Used ~  Perc_Tree:Veg_Class + Perc_Tree + Fire_Cat + Veg_Class + Ave_Wet + strata(Den_ID), data = data, method='efron')
+cand.models.1[[4]] <- clogit(Used ~ Fire_Cat + Perc_Tree + Veg_Class + Ave_Wet  + strata(Den_ID), data = data, method='efron')
 Modnames <- paste("mod", 1:length(cand.models.1), sep = " ")
 aictab(cand.set = cand.models.1, modnames = Modnames, sort = TRUE)
 ## STEP 1 RESULT - KEEP mod 2 (no interaction term)
@@ -302,11 +291,12 @@ lrtest(cand.models.5[[1]],cand.models.5[[2]])
 
 # list1 <- list()
 # list1[[1]] <- cand.models.4[[1]]
-# list1[[2]] <- clogit(Used ~ Perc_Tree + L.dist2build + strata(DenID), data = data, method='efron')
+# list1[[2]] <- clogit(Used ~ Perc_Tree + L.dist2build + strata(Den_ID), data = data, method='efron')
 # Modnames <- paste("mod", 1:length(list1), sep = " ")
 # aictab(cand.set = list1, modnames = Modnames, sort = TRUE)
 
 final.mod <- cand.models.4[[1]]
 summary(final.mod ) #include the exp(coef) table in the paper 
 ```
+
 
