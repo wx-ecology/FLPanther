@@ -9,7 +9,7 @@ Panther_cLogit - applying conditional logistic regression.
 
 Try out different random point sizes (25, 50, and 100). The final result is consistent.
 
-## figure makeing 
+## figure making 
 Figure2_calc_fire_area: calculating area of each fire category in estimated pre-dennning home range (figure 2 right panel)
 Figure2_DEN_STATES: seasonal distribution of dens (figure 2 left panel)
 
