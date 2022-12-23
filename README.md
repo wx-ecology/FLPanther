@@ -1,7 +1,9 @@
 # Florida Panther Den Site Selection
 ## data prep
 RandomPts_FireCat: generate random points for each HR
+
 Combine Fire Env: combine Den - fire category from previous analysis with new env extractions
+
 Combine_gis_EE: Combine env extraction from GEE output and arcGIS output
 
 ## statistic analysis
