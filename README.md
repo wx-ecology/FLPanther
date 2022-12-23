@@ -1,6 +1,6 @@
 # Florida Panther Den Site Selection
 ## data prep
-RandomPts_FireCat: generate random points for each HR
+HR_reconstruction_rd_pts_generation.R: create buffer to approximate predenning habitat. Generate random points within each predenning HR. 
 
 Combine Fire Env: combine Den - fire category from previous analysis with new env extractions
 
