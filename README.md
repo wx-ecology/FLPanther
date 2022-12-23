@@ -5,9 +5,13 @@ Combine Fire Env: combine Den - fire category from previous analysis with new en
 Combine_gis_EE: Combine env extraction from GEE output and arcGIS output
 
 ## statistic analysis
-Panther GLMM (and output) - first pass of applying GLMM. But encounter singularity issue - random effect factor has too many levels
-Panther cLogit (and output) - applying conditional logistic regression. 
+Panther_cLogit - applying conditional logistic regression. 
 
-Try out different random point sizes (10, 50, and 97). The final model is consistent, the fire effect are relatively consistent but the 97 pts version better differentiate ABU and CD.
+Try out different random point sizes (25, 50, and 100). The final result is consistent.
 
-Last updated: April 20, 2020
+## figure makeing 
+Figure2_calc_fire_area: calculating area of each fire category in estimated pre-dennning home range (figure 2 right panel)
+Figure2_DEN_STATES: seasonal distribution of dens (figure 2 left panel)
+
+
+Last updated: Dec, 2022
